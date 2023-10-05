@@ -1,0 +1,289 @@
+   1              	# 0 "./src/game.s"
+   2              	# 1 "C:\\Users\\roryw\\OneDrive\\Documents\\College\\ICS Year 1\\CSU11021 Intro to Computing\\2590-
+   0              	
+   0              	
+   0              	
+   1              	# PASTE LINK TO TEAM VIDEO BELOW
+   2              	#
+   3              	#
+   4              	
+   5              	  .syntax unified
+   6              	  .cpu cortex-m4
+   7              	  .fpu softvfp
+   8              	  .thumb
+   9              	  
+  10              	  .global Main
+  11              	  .global  SysTick_Handler
+  12              	  .global EXTI0_IRQHandler
+  13              	
+  14              	  @ Definitions are in definitions.s to keep this file "clean"
+  15              	  .include "./src/definitions.s"
+   1              	  .equ    GPIOE_BASE, 0x48001000
+   2              	  .equ    GPIOE_MODER, (GPIOE_BASE + 0x00)
+   3              	  .equ    GPIOE_OTYPER, (GPIOE_BASE + 0x04)
+   4              	  .equ    GPIOE_OSPEEDR, (GPIOE_BASE + 0x08)
+   5              	  .equ    GPIOE_PUPDR, (GPIOE_BASE + 0x0C)
+   6              	  .equ    GPIOE_IDR, (GPIOE_BASE + 0x10)
+   7              	  .equ    GPIOE_ODR, (GPIOE_BASE + 0x14)
+   8              	  .equ    GPIOE_BSRR, (GPIOE_BASE + 0x18)
+   9              	  .equ    GPIOE_LCKR, (GPIOE_BASE + 0x1C)
+  10              	  .equ    GPIOE_AFRL, (GPIOE_BASE + 0x20)
+  11              	  .equ    GPIOE_AFRH, (GPIOE_BASE + 0x24)
+  12              	
+  13              	  .equ    RCC_BASE, 0x40021000
+  14              	  .equ    RCC_AHBENR, (RCC_BASE + 0x14)
+  15              	  .equ    RCC_AHBENR_GPIOEEN_BIT, 21
+  16              	
+  17              	  .equ    SYSTICK_BASE, 0xE000E010
+  18              	  .equ    SYSTICK_CSR, (SYSTICK_BASE + 0x00)
+  19              	  .equ    SYSTICK_LOAD, (SYSTICK_BASE + 0x04)
+  20              	  .equ    SYSTICK_VAL, (SYSTICK_BASE + 0x08)
+  21              	
+  22              	  .equ    SYSCFG_BASE, (0x40010000)
+  23              	  .equ    SYSCFG_EXTIICR1, (SYSCFG_BASE + 0x08)
+  24              	
+  25              	  .equ    NVIC_ISER, 0xE000E100
+  26              	
+  27              	  .equ    EXTI_BASE, 0x40010400
+  28              	  .equ    EXTI_IMR, (EXTI_BASE + 0x00)
+  29              	  .equ    EXTI_RTSR, (EXTI_BASE + 0x08)
+  30              	  .equ    EXTI_FTSR, (EXTI_BASE + 0x0C)
+  31              	  .equ    EXTI_PR, (EXTI_BASE + 0x14)
+  32              	
+  33              	  .equ    LD3_PIN, 9
+  34              	  .equ    LD4_PIN, 8
+  35              	  .equ    LD5_PIN, 10
+  36              	  .equ    LD6_PIN, 15
+  37              	  .equ    LD7_PIN, 11
+  38              	  .equ    LD8_PIN, 14
+  39              	  .equ    LD9_PIN, 12
+  40              	  .equ    LD10_PIN, 13
+  41              	  
+  42              	  .equ    SCB_BASE, 0xE000ED00
+  43              	  .equ    SCB_ICSR, (SCB_BASE + 0x04)
+  44              	  .equ    SCB_ICSR_PENDSTCLR, (1<<25)
+  16              	
+  17              	  .equ    BLINK_PERIOD, 250
+  18              	
+  19              	  .section .text
+  20              	
+  21              	Main:
+  22 0000 30B5     	  PUSH  {R4-R5,LR}
+  23              	
+  24              	
+  25              	  @
+  26              	  @ Prepare GPIO Port E Pin 9 for output (LED LD3)
+  27              	  @ We'll blink LED LD3 (the orange LED)
+  28              	  @
+  29              	
+  30              	  @ Enable GPIO port E by enabling its clock
+  31 0002 2F4C     	  LDR     R4, =RCC_AHBENR
+  32 0004 2568     	  LDR     R5, [R4]
+  33 0006 45F40015 	  ORR     R5, R5, #(0b1 << (RCC_AHBENR_GPIOEEN_BIT))
+  34 000a 2560     	  STR     R5, [R4]
+  35              	
+  36              	  @ Configure LD3 for output
+  37              	  @   by setting bits 27:26 of GPIOE_MODER to 01 (GPIO Port E Mode Register)
+  38              	  @   (by BIClearing then ORRing)
+  39 000c 2D4C     	  LDR     R4, =GPIOE_MODER
+  40 000e 2568     	  LDR     R5, [R4]                    @ Read ...
+  41 0010 25F44025 	  BIC     R5, #(0b11<<(LD3_PIN*2))    @ Modify ...
+  42 0014 45F48025 	  ORR     R5, #(0b01<<(LD3_PIN*2))    @ write 01 to bits 
+  43 0018 2560     	  STR     R5, [R4]                    @ Write 
+  44              	
+  45              	  @ Initialise the first countdown
+  46              	
+  47 001a 2B4C     	  LDR     R4, =blink_countdown
+  48 001c 4FF0FA05 	  LDR     R5, =BLINK_PERIOD
+  49 0020 2560     	  STR     R5, [R4]  
+  50              	
+  51              	  @ Configure SysTick Timer to generate an interrupt every 1ms
+  52              	
+  53 0022 2A4C     	  LDR     R4, =SCB_ICSR               @ Clear any pre-existing interrupts
+  54 0024 4FF00075 	  LDR     R5, =SCB_ICSR_PENDSTCLR     @
+  55 0028 2560     	  STR     R5, [R4]                    @
+  56              	
+  57 002a 294C     	  LDR     R4, =SYSTICK_CSR            @ Stop SysTick timer
+  58 002c 4FF00005 	  LDR     R5, =0                      @   by writing 0 to CSR
+  59 0030 2560     	  STR     R5, [R4]                    @   CSR is the Control and Status Register
+  60              	  
+  61 0032 284C     	  LDR     R4, =SYSTICK_LOAD           @ Set SysTick LOAD for 1ms delay
+  62 0034 41F63F75 	  LDR     R5, =7999                   @ Assuming 8MHz clock
+  63 0038 2560     	  STR     R5, [R4]                    @ 
+  64              	
+  65 003a 274C     	  LDR     R4, =SYSTICK_VAL            @   Reset SysTick internal counter to 0
+  66 003c 4FF00105 	  LDR     R5, =0x1                    @     by writing any value
+  67 0040 2560     	  STR     R5, [R4]
+  68              	
+  69 0042 234C     	  LDR     R4, =SYSTICK_CSR            @   Start SysTick timer by setting CSR to 0x7
+  70 0044 4FF00705 	  LDR     R5, =0x7                    @     set CLKSOURCE (bit 2) to system clock (1)
+  71 0048 2560     	  STR     R5, [R4]                    @     set TICKINT (bit 1) to 1 to enable interrupts
+  72              	                                      @     set ENABLE (bit 0) to 1
+  73              	
+  74              	
+  75              	  @
+  76              	  @ Prepare external interrupt Line 0 (USER pushbutton)
+  77              	  @ We'll count the number of times the button is pressed
+  78              	  @
+  79              	
+  80              	  @ Initialise count to zero
+  81 004a 244C     	  LDR   R4, =button_count             @ count = 0;
+  82 004c 4FF00005 	  MOV   R5, #0                        @
+  83 0050 2560     	  STR   R5, [R4]                      @
+  84              	
+  85              	  @ Configure USER pushbutton (GPIO Port A Pin 0 on STM32F3 Discovery
+  86              	  @   kit) to use the EXTI0 external interrupt signal
+  87              	  @ Determined by bits 3..0 of the External Interrrupt Control
+  88              	  @   Register (EXTIICR)
+  89 0052 234C     	  LDR     R4, =SYSCFG_EXTIICR1
+  90 0054 2568     	  LDR     R5, [R4]
+  91 0056 25F00F05 	  BIC     R5, R5, #0b1111
+  92 005a 2560     	  STR     R5, [R4]
+  93              	
+  94              	  @ Enable (unmask) interrupts on external interrupt Line0
+  95 005c 214C     	  LDR     R4, =EXTI_IMR
+  96 005e 2568     	  LDR     R5, [R4]
+  97 0060 45F00105 	  ORR     R5, R5, #1
+  98 0064 2560     	  STR     R5, [R4]
+  99              	
+ 100              	  @ Set falling edge detection on Line0
+ 101 0066 204C     	  LDR     R4, =EXTI_FTSR
+ 102 0068 2568     	  LDR     R5, [R4]
+ 103 006a 45F00105 	  ORR     R5, R5, #1
+ 104 006e 2560     	  STR     R5, [R4]
+ 105              	
+ 106              	  @ Enable NVIC interrupt #6 (external interrupt Line0)
+ 107 0070 1E4C     	  LDR     R4, =NVIC_ISER
+ 108 0072 4FF04005 	  MOV     R5, #(1<<6)
+ 109 0076 2560     	  STR     R5, [R4]
+ 110              	
+ 111              	  @ Nothing else to do in Main
+ 112              	  @ Idle loop forever (welcome to interrupts!!)
+ 113              	Idle_Loop:
+ 114 0078 FEE7     	  B     Idle_Loop
+ 115              	  
+ 116              	End_Main:
+ 117 007a 30BD     	  POP   {R4-R5,PC}
+ 118              	
+ 119              	
+ 120              	
+ 121              	@
+ 122              	@ SysTick interrupt handler (blink LED LD3)
+ 123              	@
+ 125              	SysTick_Handler:
+ 126              	
+ 127 007c 30B5     	  PUSH  {R4, R5, LR}
+ 128              	
+ 129 007e 124C     	  LDR   R4, =blink_countdown        @ if (countdown != 0) {
+ 130 0080 2568     	  LDR   R5, [R4]                    @
+ 131 0082 002D     	  CMP   R5, #0                      @
+ 132 0084 03D0     	  BEQ   .LelseFire                  @
+ 133              	
+ 134 0086 A5F10105 	  SUB   R5, R5, #1                  @   countdown = countdown - 1;
+ 135 008a 2560     	  STR   R5, [R4]                    @
+ 136              	
+ 137 008c 08E0     	  B     .LendIfDelay                @ }
+ 138              	
+ 139              	.LelseFire:                         @ else {
+ 140              	
+ 141 008e 184C     	  LDR     R4, =GPIOE_ODR            @   Invert LD3
+ 142 0090 2568     	  LDR     R5, [R4]                  @
+ 143 0092 85F40075 	  EOR     R5, #(0b1<<(LD3_PIN))     @   GPIOE_ODR = GPIOE_ODR ^ (1<<LD3_PIN);
+ 144 0096 2560     	  STR     R5, [R4]                  @ 
+ 145              	
+ 146 0098 0B4C     	  LDR     R4, =blink_countdown      @   countdown = BLINK_PERIOD;
+ 147 009a 4FF0FA05 	  LDR     R5, =BLINK_PERIOD         @
+ 148 009e 2560     	  STR     R5, [R4]                  @
+ 149              	
+ 150              	.LendIfDelay:                       @ }
+ 151              	
+ 152 00a0 0A4C     	  LDR     R4, =SCB_ICSR             @ Clear (acknowledge) the interrupt
+ 153 00a2 4FF00075 	  LDR     R5, =SCB_ICSR_PENDSTCLR   @
+ 154 00a6 2560     	  STR     R5, [R4]                  @
+ 155              	
+ 156              	  @ Return from interrupt handler
+ 157 00a8 30BD     	  POP  {R4, R5, PC}
+ 158              	
+ 159              	
+ 160              	
+ 161              	@
+ 162              	@ External interrupt line 0 interrupt handler
+ 163              	@   (count button presses)
+ 164              	@
+ 166              	EXTI0_IRQHandler:
+ 167              	
+ 168 00aa 30B5     	  PUSH  {R4,R5,LR}
+ 169              	
+ 170 00ac 0B4C     	  LDR   R4, =button_count           @ count = count + 1
+ 171 00ae 2568     	  LDR   R5, [R4]                    @
+ 172 00b0 05F10105 	  ADD   R5, R5, #1                  @
+ 173 00b4 2560     	  STR   R5, [R4]                    @
+ 174              	
+ 175 00b6 0F4C     	  LDR   R4, =EXTI_PR                @ Clear (acknowledge) the interrupt
+ 176 00b8 4FF00105 	  MOV   R5, #(1<<0)                 @
+ 177 00bc 2560     	  STR   R5, [R4]                    @
+ 178              	
+ 179              	  @ Return from interrupt handler
+ 180 00be 30BD     	  POP  {R4,R5,PC}
+ 181              	
+ 182              	
+ 183              	  .section .data
+ 184              	  
+ 185              	button_count:
+ 186 0000 00000000 	  .space  4
+ 187              	
+ 188              	blink_countdown:
+ 189 0004 00000000 	  .space  4
+ 190              	
+ 191              	  .end...
+DEFINED SYMBOLS
+        ./src/game.s:21     .text:0000000000000000 Main
+        ./src/game.s:125    .text:000000000000007c SysTick_Handler
+        ./src/game.s:166    .text:00000000000000aa EXTI0_IRQHandler
+ ./src/definitions.s:1      *ABS*:0000000048001000 GPIOE_BASE
+ ./src/definitions.s:2      *ABS*:0000000048001000 GPIOE_MODER
+ ./src/definitions.s:3      *ABS*:0000000048001004 GPIOE_OTYPER
+ ./src/definitions.s:4      *ABS*:0000000048001008 GPIOE_OSPEEDR
+ ./src/definitions.s:5      *ABS*:000000004800100c GPIOE_PUPDR
+ ./src/definitions.s:6      *ABS*:0000000048001010 GPIOE_IDR
+ ./src/definitions.s:7      *ABS*:0000000048001014 GPIOE_ODR
+ ./src/definitions.s:8      *ABS*:0000000048001018 GPIOE_BSRR
+ ./src/definitions.s:9      *ABS*:000000004800101c GPIOE_LCKR
+ ./src/definitions.s:10     *ABS*:0000000048001020 GPIOE_AFRL
+ ./src/definitions.s:11     *ABS*:0000000048001024 GPIOE_AFRH
+ ./src/definitions.s:13     *ABS*:0000000040021000 RCC_BASE
+ ./src/definitions.s:14     *ABS*:0000000040021014 RCC_AHBENR
+ ./src/definitions.s:15     *ABS*:0000000000000015 RCC_AHBENR_GPIOEEN_BIT
+ ./src/definitions.s:17     *ABS*:00000000e000e010 SYSTICK_BASE
+ ./src/definitions.s:18     *ABS*:00000000e000e010 SYSTICK_CSR
+ ./src/definitions.s:19     *ABS*:00000000e000e014 SYSTICK_LOAD
+ ./src/definitions.s:20     *ABS*:00000000e000e018 SYSTICK_VAL
+ ./src/definitions.s:22     *ABS*:0000000040010000 SYSCFG_BASE
+ ./src/definitions.s:23     *ABS*:0000000040010008 SYSCFG_EXTIICR1
+ ./src/definitions.s:25     *ABS*:00000000e000e100 NVIC_ISER
+ ./src/definitions.s:27     *ABS*:0000000040010400 EXTI_BASE
+ ./src/definitions.s:28     *ABS*:0000000040010400 EXTI_IMR
+ ./src/definitions.s:29     *ABS*:0000000040010408 EXTI_RTSR
+ ./src/definitions.s:30     *ABS*:000000004001040c EXTI_FTSR
+ ./src/definitions.s:31     *ABS*:0000000040010414 EXTI_PR
+ ./src/definitions.s:33     *ABS*:0000000000000009 LD3_PIN
+ ./src/definitions.s:34     *ABS*:0000000000000008 LD4_PIN
+ ./src/definitions.s:35     *ABS*:000000000000000a LD5_PIN
+ ./src/definitions.s:36     *ABS*:000000000000000f LD6_PIN
+ ./src/definitions.s:37     *ABS*:000000000000000b LD7_PIN
+ ./src/definitions.s:38     *ABS*:000000000000000e LD8_PIN
+ ./src/definitions.s:39     *ABS*:000000000000000c LD9_PIN
+ ./src/definitions.s:40     *ABS*:000000000000000d LD10_PIN
+ ./src/definitions.s:42     *ABS*:00000000e000ed00 SCB_BASE
+ ./src/definitions.s:43     *ABS*:00000000e000ed04 SCB_ICSR
+ ./src/definitions.s:44     *ABS*:0000000002000000 SCB_ICSR_PENDSTCLR
+        ./src/game.s:17     *ABS*:00000000000000fa BLINK_PERIOD
+        ./src/game.s:22     .text:0000000000000000 $t
+        ./src/game.s:188    .data:0000000000000004 blink_countdown
+        ./src/game.s:185    .data:0000000000000000 button_count
+        ./src/game.s:113    .text:0000000000000078 Idle_Loop
+        ./src/game.s:116    .text:000000000000007a End_Main
+        ./src/game.s:186    .data:0000000000000000 $d
+        ./src/game.s:191    .text:00000000000000c0 $d
+
+NO UNDEFINED SYMBOLS
